@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    // Connection test
+    match /test/{testId} {
+      allow read, write: if true;
+    }
+
+    // Nurses data
+    match /nurses/{nurseId} {
+      allow read, write: if true;
+    }
+
+    // Machines data
+    match /machines/{machineId} {
+      allow read, write: if true;
+    }
+
+    // Shift Assignments
+    match /assignments/{assignmentId} {
+      allow read, write: if true;
+    }
+
+    // App Settings
+    match /settings/{settingId} {
+      allow read, write: if true;
+    }
+
+    // Registered accounts for authentication verification across devices
+    match /registered_accounts/{accountId} {
+      allow read, write: if true;
+    }
+  }
+}

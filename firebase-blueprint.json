@@ -1,0 +1,115 @@
+{
+  "entities": {
+    "UserProfile": {
+      "collection": "users",
+      "fields": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "description": "User email address" },
+        "displayName": { "type": "string", "description": "Full name of nurse or admin" },
+        "role": { "type": "string", "description": "Role: 'admin' (Kepala Ruangan) or 'nurse' (Perawat Pelaksana/PJ Shift)" },
+        "nurseId": { "type": "number", "description": "Linked Nurse ID if applicable" },
+        "phone": { "type": "string", "description": "WhatsApp/Phone number" },
+        "createdAt": { "type": "string", "description": "ISO timestamp of registration" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      }
+    },
+    "Nurse": {
+      "collection": "nurses",
+      "fields": {
+        "id": { "type": "number", "description": "Unique numeric nurse ID" },
+        "name": { "type": "string", "description": "Nurse full name" },
+        "nip": { "type": "string", "description": "Nurse NIP or staff code" },
+        "phone": { "type": "string", "description": "WhatsApp phone number" },
+        "role": { "type": "string", "description": "Role in HD room: KARU, KATIM, PELAKSANA" },
+        "isActive": { "type": "boolean", "description": "Whether nurse is active" },
+        "defaultOffDay": { "type": "number", "description": "Day of week for preferred off" },
+        "skillLevel": { "type": "string", "description": "Senior, Medium, Junior" },
+        "specialDuty": { "type": "string", "description": "Special duty/PIC role e.g. BHP, NATRIUM RO, FARMASI, etc." }
+      }
+    },
+    "Machine": {
+      "collection": "machines",
+      "fields": {
+        "id": { "type": "number", "description": "Machine numeric ID 1 to 25" },
+        "code": { "type": "string", "description": "Machine code e.g. M-01" },
+        "name": { "type": "string", "description": "Machine name e.g. Mesin HD 01" },
+        "bay": { "type": "string", "description": "Bay location" },
+        "category": { "type": "string", "description": "REGULER, HEPATITIS_B, HEPATITIS_C, ISOLASI" },
+        "status": { "type": "string", "description": "AKTIF, TIDAK_DIGUNAKAN, MAINTENANCE, RUSAK" },
+        "brandModel": { "type": "string", "description": "Brand and model" },
+        "notes": { "type": "string", "description": "Maintenance notes" }
+      }
+    },
+    "ShiftAssignment": {
+      "collection": "assignments",
+      "fields": {
+        "id": { "type": "string", "description": "Unique assignment ID YYYY-MM-DD_nurseId" },
+        "date": { "type": "string", "description": "Date format YYYY-MM-DD" },
+        "shiftType": { "type": "string", "description": "PAGI, SIANG, LIBUR, CUTI, SAKIT" },
+        "nurseId": { "type": "number", "description": "ID of assigned nurse" },
+        "nurseName": { "type": "string", "description": "Name of assigned nurse" },
+        "nursePhone": { "type": "string", "description": "Phone number" },
+        "assignedMachineIds": { "type": "array", "description": "Array of machine IDs assigned" },
+        "isLeader": { "type": "boolean", "description": "Is leader of shift" },
+        "isWhatsAppSent": { "type": "boolean", "description": "WA notification status" },
+        "notes": { "type": "string", "description": "Special duty notes" },
+        "specialDuty": { "type": "string", "description": "Assigned special duty/PIC for this shift" }
+      }
+    },
+    "AppSettings": {
+      "collection": "settings",
+      "fields": {
+        "id": { "type": "number", "description": "Settings ID 1" },
+        "hospitalName": { "type": "string", "description": "Hospital Name" },
+        "roomName": { "type": "string", "description": "Room Name" },
+        "headNurseName": { "type": "string", "description": "Head Nurse Name" },
+        "headNursePhone": { "type": "string", "description": "Head Nurse Phone" },
+        "googleSheetWebhookUrl": { "type": "string", "description": "Google Sheet Webhook URL" },
+        "googleSpreadsheetIdOrUrl": { "type": "string", "description": "Spreadsheet ID/URL" },
+        "autoSyncGoogleSheets": { "type": "boolean", "description": "Auto sync flag" },
+        "minNursesPerShift": { "type": "number", "description": "Minimum nurses" },
+        "maxConsecutiveWorkDays": { "type": "number", "description": "Max consecutive work days" },
+        "lastSyncTimestamp": { "type": "number", "description": "Timestamp of last sync" },
+        "lastSyncStatus": { "type": "string", "description": "Status text" }
+      }
+    },
+    "RegisteredAccount": {
+      "collection": "registered_accounts",
+      "fields": {
+        "uid": { "type": "string", "description": "User identifier" },
+        "email": { "type": "string", "description": "Registered email" },
+        "displayName": { "type": "string", "description": "Full name" },
+        "role": { "type": "string", "description": "User role: admin or nurse" },
+        "nurseId": { "type": "number", "description": "Linked nurse ID or null" },
+        "password": { "type": "string", "description": "Account password" },
+        "createdAt": { "type": "string", "description": "Registration ISO timestamp" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles and credentials"
+    },
+    "/nurses/{nurseId}": {
+      "schema": "Nurse",
+      "description": "Master data perawat unit dialisis"
+    },
+    "/machines/{machineId}": {
+      "schema": "Machine",
+      "description": "Master data mesin hemodialisis"
+    },
+    "/assignments/{assignmentId}": {
+      "schema": "ShiftAssignment",
+      "description": "Alokasi dinas dan mesin perawat per tanggal"
+    },
+    "/settings/{settingId}": {
+      "schema": "AppSettings",
+      "description": "Pengaturan unit hemodialisis dan integrasi"
+    },
+    "/registered_accounts/{accountId}": {
+      "schema": "RegisteredAccount",
+      "description": "Data akun terdaftar unit hemodialisis"
+    }
+  }
+}

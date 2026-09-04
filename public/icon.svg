@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="hemoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="50%" stop-color="#0369a1" />
+      <stop offset="100%" stop-color="#1e3a8a" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+  <!-- Background with smooth rounded squircle for Android -->
+  <rect width="512" height="512" rx="112" fill="url(#hemoGrad)"/>
+  
+  <!-- Subtle inner ambient circle -->
+  <circle cx="256" cy="256" r="180" fill="none" stroke="#38bdf8" stroke-width="4" stroke-opacity="0.25" stroke-dasharray="12 8" />
+
+  <!-- Center Dialysis Cross & Pulse Symbol -->
+  <g filter="url(#shadow)" transform="translate(256,256)">
+    <!-- Dialysis machine shield/body -->
+    <rect x="-85" y="-110" width="170" height="220" rx="36" fill="#ffffff" />
+    
+    <!-- Header Screen Area -->
+    <rect x="-65" y="-90" width="130" height="75" rx="16" fill="#0f172a" />
+    
+    <!-- Heartbeat ECG line on screen -->
+    <path d="M -50 -52 L -30 -52 L -20 -72 L -8 -30 L 5 -60 L 15 -52 L 50 -52" 
+          fill="none" stroke="#38bdf8" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+    
+    <!-- Hemodialysis Dual Flow Indicators (Arterial Red & Venous Blue) -->
+    <circle cx="-35" cy="28" r="16" fill="#ef4444" />
+    <circle cx="35" cy="28" r="16" fill="#0284c7" />
+
+    <!-- Center Medical Cross -->
+    <path d="M -14 62 H 14 V 98 H -14 Z M -32 74 H 32 V 86 H -32 Z" fill="#0369a1" />
+  </g>
+</svg>
