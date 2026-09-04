@@ -45,6 +45,7 @@ export const MachineLayoutScreen: React.FC = () => {
     machines,
     dailyAssignments,
     selectedDate,
+    bays: contextBays,
     updateMachine,
     addMachine,
     deleteMachine,
@@ -71,14 +72,24 @@ export const MachineLayoutScreen: React.FC = () => {
 
   // Group machines by Bay for visual floor plan layout in room sequence
   const bays = useMemo(() => {
+    const deletedBays = new Set<string>(
+      JSON.parse(localStorage.getItem('hemo_deleted_bays_v1') || '[]').map((b: string) => b.trim().toLowerCase())
+    );
     const bayOrder: string[] = [];
+    (contextBays || []).forEach((b) => {
+      const trimmed = b?.trim();
+      if (trimmed && !deletedBays.has(trimmed.toLowerCase()) && !bayOrder.includes(trimmed)) {
+        bayOrder.push(trimmed);
+      }
+    });
     WhatsAppDispatcher.getSortedMachines(machines).forEach((m) => {
-      if (!bayOrder.includes(m.bay)) {
-        bayOrder.push(m.bay);
+      const trimmed = m.bay?.trim();
+      if (trimmed && !deletedBays.has(trimmed.toLowerCase()) && !bayOrder.includes(trimmed)) {
+        bayOrder.push(trimmed);
       }
     });
     return bayOrder;
-  }, [machines]);
+  }, [contextBays, machines]);
 
   // Nurses working on active shift
   const nursesOnShift = useMemo(() => {

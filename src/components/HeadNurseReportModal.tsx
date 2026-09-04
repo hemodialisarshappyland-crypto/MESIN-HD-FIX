@@ -12,7 +12,6 @@ import {
   ExternalLink,
   Globe,
   Phone,
-  Layers,
   Zap,
   UserCheck,
   Edit3,
@@ -31,8 +30,8 @@ export const HeadNurseReportModal: React.FC<HeadNurseReportModalProps> = ({ onCl
   const [saveToSettings, setSaveToSettings] = useState(true);
   const [copied, setCopied] = useState(false);
 
-  // Format Switch State
-  const [formatMode, setFormatMode] = useState<HeadNurseReportFormat>('LENGKAP_MESIN');
+  // Format Switch State (Default to RINGKAS format)
+  const [formatMode, setFormatMode] = useState<HeadNurseReportFormat>('RINGKAS');
   // Editable text state
   const [isCustomEditing, setIsCustomEditing] = useState(false);
   const [editedText, setEditedText] = useState<string>('');
@@ -154,12 +153,10 @@ export const HeadNurseReportModal: React.FC<HeadNurseReportModalProps> = ({ onCl
   // Format label name helper
   const getFormatLabel = () => {
     switch (formatMode) {
-      case 'LENGKAP_MESIN':
-        return 'Format Lengkap (Urut Mesin)';
       case 'RINGKAS':
-        return 'Format Ringkas (Cepat)';
+        return 'Format Ringkas Standar';
       case 'NAMA_PERAWAT':
-        return 'Format Berdasarkan Nama (A-Z)';
+        return 'Format Urut Nama (A-Z)';
       default:
         return 'Laporan HD';
     }
@@ -289,54 +286,39 @@ export const HeadNurseReportModal: React.FC<HeadNurseReportModalProps> = ({ onCl
               </div>
             </div>
 
-            {/* Segmented Control 3 Buttons */}
-            <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700">
-              <button
-                type="button"
-                onClick={() => handleSelectFormat('LENGKAP_MESIN')}
-                className={`py-2 px-2 rounded-xl text-[11px] font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1 text-center ${
-                  formatMode === 'LENGKAP_MESIN'
-                    ? 'bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-300 shadow-xs border border-blue-200 dark:border-blue-800'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
-                <span className="truncate">Format Lengkap (Urut Mesin)</span>
-              </button>
-
+            {/* Segmented Control 2 Buttons */}
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700">
               <button
                 type="button"
                 onClick={() => handleSelectFormat('RINGKAS')}
-                className={`py-2 px-2 rounded-xl text-[11px] font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1 text-center ${
+                className={`py-2 px-2.5 rounded-xl text-[11px] font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 text-center ${
                   formatMode === 'RINGKAS'
                     ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-xs border border-emerald-200 dark:border-emerald-800'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Zap className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                <span className="truncate">Format Ringkas (Cepat)</span>
+                <span className="truncate">Format Ringkas Standar (Urut Alokasi)</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => handleSelectFormat('NAMA_PERAWAT')}
-                className={`py-2 px-2 rounded-xl text-[11px] font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1 text-center ${
+                className={`py-2 px-2.5 rounded-xl text-[11px] font-bold transition-all flex flex-col sm:flex-row items-center justify-center gap-1.5 text-center ${
                   formatMode === 'NAMA_PERAWAT'
                     ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-300 shadow-xs border border-indigo-200 dark:border-indigo-800'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <UserCheck className="w-3.5 h-3.5 shrink-0 text-indigo-600 dark:text-indigo-400" />
-                <span className="truncate">Urut Nama (A-Z)</span>
+                <span className="truncate">Urut Nama Perawat (A-Z)</span>
               </button>
             </div>
             <p className="text-[10px] text-slate-500 dark:text-slate-400 px-1">
-              {formatMode === 'LENGKAP_MESIN' &&
-                '💡 Format lengkap merinci status mesin, PIC, perawat dinas diurutkan dari nomor mesin HD-01 ke atas.'}
               {formatMode === 'RINGKAS' &&
-                '💡 Format ringkas 1-baris per perawat dengan rentang mesin & tugas khusus/PIC, lebih padat dan cepat dibaca di layar ponsel.'}
+                '💡 Format resmi sesuai template Ringkasan Jadwal & Alokasi Mesin HD RS Happy Land Medical Centre.'}
               {formatMode === 'NAMA_PERAWAT' &&
-                '💡 Format alfabetis mengurutkan nama perawat (A-Z) pada setiap sif untuk memudahkan pengecekan staf.'}
+                '💡 Format resmi yang disusun secara alfabetis (A-Z) nama perawat pada setiap sif untuk kemudahan verifikasi.'}
             </p>
           </div>
 

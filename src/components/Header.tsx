@@ -15,7 +15,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onNavigateToAccount }) => {
-  const { settings, nurses, machines, isCloudConnected } = useHemo();
+  const { settings, nurses, machines, isCloudConnected, isSyncing, fetchDataFromCloud } = useHemo();
   const { userProfile, isAuthenticated, role, logout } = useAuth();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
@@ -49,17 +49,28 @@ export const Header: React.FC<HeaderProps> = ({ onNavigateToAccount }) => {
                 <span className="text-[9px] sm:text-[10px] font-bold tracking-wider bg-sky-100 text-sky-800 px-2 py-0.5 rounded-full border border-sky-300 hidden xs:inline-block shadow-2xs">
                   {machines.length} MESIN • {nurses.length} PERAWAT
                 </span>
-                {isCloudConnected && (
-                  <span
-                    className="inline-flex items-center gap-1.5 text-[9px] font-extrabold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300 shadow-2xs"
-                    title="Database Cloud Firestore terhubung secara real-time"
+                {isCloudConnected ? (
+                  <button
+                    onClick={() => fetchDataFromCloud()}
+                    disabled={isSyncing}
+                    className="inline-flex items-center gap-1.5 text-[9px] font-extrabold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 px-2.5 py-0.5 rounded-full border border-emerald-300 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                    title="Database Cloud Firestore terhubung secara real-time. Klik untuk menyegarkan data dari Cloud."
                   >
                     <span className="relative flex h-1.5 w-1.5">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-600"></span>
                     </span>
-                    Live Sync
-                  </span>
+                    <span>{isSyncing ? 'Sinkron...' : 'Live Sync'}</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => fetchDataFromCloud()}
+                    disabled={isSyncing}
+                    className="inline-flex items-center gap-1 text-[9px] font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 px-2.5 py-0.5 rounded-full border border-amber-300 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                    title="Klik untuk menghubungkan ke Cloud Firestore"
+                  >
+                    <span>{isSyncing ? 'Menghubungkan...' : 'Hubungkan Cloud'}</span>
+                  </button>
                 )}
               </div>
               <p className="text-[11px] sm:text-xs text-slate-600 font-medium truncate max-w-[170px] sm:max-w-xs md:max-w-md mt-0.5">

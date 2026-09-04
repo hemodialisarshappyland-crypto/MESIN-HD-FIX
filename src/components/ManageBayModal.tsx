@@ -44,21 +44,23 @@ export const ManageBayModal: React.FC<ManageBayModalProps> = ({
     isAdmin,
   } = useHemo();
 
-  // Extract all unique existing bays (from context bays list AND machines)
+  // Extract all unique existing bays from context bays list
   const existingBays = useMemo(() => {
-    const set = new Set<string>();
-    (contextBays || []).forEach((b) => set.add(b));
-    machines.forEach((m) => {
-      if (m.bay) set.add(m.bay);
+    const deletedBays = new Set<string>(
+      JSON.parse(localStorage.getItem('hemo_deleted_bays_v1') || '[]').map((b: string) => b.trim().toLowerCase())
+    );
+    const list: string[] = [];
+    (contextBays || []).forEach((b) => {
+      const trimmed = b?.trim();
+      if (trimmed && !deletedBays.has(trimmed.toLowerCase()) && !list.includes(trimmed)) {
+        list.push(trimmed);
+      }
     });
-    if (set.size === 0) {
-      set.add('Bay A (Reguler)');
-      set.add('Bay B (Reguler)');
-      set.add('Bay C (Depan)');
-      set.add('Bay C (Khusus & Isolasi)');
+    if (list.length === 0) {
+      list.push('Bay A (Reguler)');
     }
-    return Array.from(set);
-  }, [contextBays, machines]);
+    return list;
+  }, [contextBays]);
 
   const [activeTab, setActiveTab] = useState<'EDIT_BAY' | 'CREATE_BAY'>('EDIT_BAY');
   const [selectedBay, setSelectedBay] = useState<string>(
@@ -72,6 +74,10 @@ export const ManageBayModal: React.FC<ManageBayModalProps> = ({
   const [selectedStatus, setSelectedStatus] = useState<MachineStatus>('AKTIF');
   const [applyStatusToAll, setApplyStatusToAll] = useState<boolean>(false);
 
+  // Delete confirmation state
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState<boolean>(false);
+  const [targetFallbackBay, setTargetFallbackBay] = useState<string>('');
+
   // Form states for creating new Bay
   const [createBayName, setCreateBayName] = useState<string>('');
   const [createBayCategory, setCreateBayCategory] = useState<MachineCategory>('REGULER');
@@ -80,8 +86,10 @@ export const ManageBayModal: React.FC<ManageBayModalProps> = ({
 
   // When selectedBay or isOpen changes, prefill form
   useEffect(() => {
-    if (initialBayName && existingBays.includes(initialBayName)) {
-      setSelectedBay(initialBayName);
+    setIsConfirmingDelete(false);
+    if (initialBayName && existingBays.some((b) => b.toLowerCase() === initialBayName.toLowerCase())) {
+      const found = existingBays.find((b) => b.toLowerCase() === initialBayName.toLowerCase());
+      if (found) setSelectedBay(found);
     } else if (!existingBays.includes(selectedBay) && existingBays.length > 0) {
       setSelectedBay(existingBays[0]);
     }
@@ -89,9 +97,12 @@ export const ManageBayModal: React.FC<ManageBayModalProps> = ({
 
   useEffect(() => {
     if (selectedBay) {
+      setIsConfirmingDelete(false);
       setNewBayName(selectedBay);
       // Determine predominant category & status of machines in this Bay
-      const bayMachines = machines.filter((m) => m.bay === selectedBay);
+      const bayMachines = machines.filter(
+        (m) => m.bay?.trim().toLowerCase() === selectedBay.trim().toLowerCase()
+      );
       if (bayMachines.length > 0) {
         setSelectedCategory(bayMachines[0].category);
         setSelectedStatus(bayMachines[0].status);
@@ -101,7 +112,9 @@ export const ManageBayModal: React.FC<ManageBayModalProps> = ({
 
   // Machines currently in the selected Bay
   const currentBayMachines = useMemo(() => {
-    return machines.filter((m) => m.bay === selectedBay);
+    return machines.filter(
+      (m) => m.bay?.trim().toLowerCase() === selectedBay.trim().toLowerCase()
+    );
   }, [machines, selectedBay]);
 
   if (!isOpen) return null;
@@ -133,8 +146,26 @@ export const ManageBayModal: React.FC<ManageBayModalProps> = ({
     onClose();
   };
 
-  // Handle deleting the selected Bay
-  const handleDeleteBay = () => {
+  // Initiate deleting the selected Bay
+  const handleInitiateDeleteBay = () => {
+    if (!isAdmin) {
+      showToast('Hanya Kepala Ruangan (Karu) atau Admin yang berwenang menghapus Bay.', 'info');
+      return;
+    }
+    if (existingBays.length <= 1) {
+      showToast('Minimal harus ada satu Bay aktif di ruangan, tidak dapat menghapus Bay terakhir.', 'error');
+      return;
+    }
+    const fallback =
+      existingBays.find((b) => b.trim().toLowerCase() !== selectedBay.trim().toLowerCase()) ||
+      existingBays[0] ||
+      'Bay A (Reguler)';
+    setTargetFallbackBay(fallback);
+    setIsConfirmingDelete(true);
+  };
+
+  // Execute deleting the selected Bay
+  const handleExecuteDeleteBay = () => {
     if (!isAdmin) {
       showToast('Hanya Kepala Ruangan (Karu) atau Admin yang berwenang menghapus Bay.', 'info');
       return;
@@ -143,9 +174,17 @@ export const ManageBayModal: React.FC<ManageBayModalProps> = ({
       showToast('Tidak dapat menghapus Bay terakhir.', 'error');
       return;
     }
-    if (window.confirm(`Yakin ingin menghapus Bay "${selectedBay}"? Mesin yang ada di dalamnya akan dialihkan ke Bay lainnya.`)) {
-      const fallback = existingBays.find((b) => b !== selectedBay) || 'Bay A (Reguler)';
-      deleteBay(selectedBay, fallback);
+    const fallback =
+      targetFallbackBay ||
+      existingBays.find((b) => b.trim().toLowerCase() !== selectedBay.trim().toLowerCase()) ||
+      'Bay A (Reguler)';
+
+    deleteBay(selectedBay, fallback);
+    setIsConfirmingDelete(false);
+    const remainingBays = existingBays.filter(
+      (b) => b.trim().toLowerCase() !== selectedBay.trim().toLowerCase()
+    );
+    if (remainingBays.length > 0) {
       setSelectedBay(fallback);
     }
   };
@@ -264,13 +303,18 @@ export const ManageBayModal: React.FC<ManageBayModalProps> = ({
                 </label>
                 <div className="flex items-center gap-2 flex-wrap">
                   {existingBays.map((bayName) => {
-                    const count = machines.filter((m) => m.bay === bayName).length;
-                    const isSelected = selectedBay === bayName;
+                    const count = machines.filter(
+                      (m) => m.bay?.trim().toLowerCase() === bayName.trim().toLowerCase()
+                    ).length;
+                    const isSelected = selectedBay.trim().toLowerCase() === bayName.trim().toLowerCase();
                     return (
                       <button
                         key={bayName}
                         type="button"
-                        onClick={() => setSelectedBay(bayName)}
+                        onClick={() => {
+                          setSelectedBay(bayName);
+                          setIsConfirmingDelete(false);
+                        }}
                         className={`px-3 py-2 rounded-xl text-xs font-black border-2 transition-all flex items-center gap-2 cursor-pointer ${
                           isSelected
                             ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
@@ -461,36 +505,100 @@ export const ManageBayModal: React.FC<ManageBayModalProps> = ({
                 )}
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex items-center justify-between gap-2 pt-2">
-                <div>
-                  {existingBays.length > 1 && (
+              {/* Action Buttons or Delete Confirmation Box */}
+              {isConfirmingDelete ? (
+                <div className="p-4 bg-rose-50 border-2 border-rose-300 rounded-2xl space-y-3 animate-in fade-in-50">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-rose-100 text-rose-700 rounded-xl shrink-0 mt-0.5">
+                      <AlertCircle className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-black text-rose-950">
+                        Konfirmasi Hapus {selectedBay}?
+                      </h4>
+                      <p className="text-xs text-rose-800 leading-relaxed">
+                        {currentBayMachines.length > 0 ? (
+                          <>
+                            Terdapat <strong>{currentBayMachines.length} mesin</strong> di dalam Bay ini (
+                            {currentBayMachines.map((m) => m.code).join(', ')}). Seluruh mesin akan otomatis dipindahkan ke Bay tujuan yang Anda pilih di bawah:
+                          </>
+                        ) : (
+                          <>Bay ini saat ini kosong (tidak ada mesin) dan aman untuk langsung dihapus.</>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {existingBays.filter((b) => b.trim().toLowerCase() !== selectedBay.trim().toLowerCase()).length > 0 && (
+                    <div className="bg-white p-3 rounded-xl border border-rose-200">
+                      <label className="text-xs font-black text-slate-800 block mb-1">
+                        Pilih Bay Tujuan untuk Mesin:
+                      </label>
+                      <select
+                        value={targetFallbackBay}
+                        onChange={(e) => setTargetFallbackBay(e.target.value)}
+                        className="w-full text-xs font-black bg-slate-50 border-2 border-slate-300 rounded-xl px-3 py-2 text-slate-900 focus:bg-white focus:outline-none focus:border-rose-500 cursor-pointer"
+                      >
+                        {existingBays
+                          .filter((b) => b.trim().toLowerCase() !== selectedBay.trim().toLowerCase())
+                          .map((b) => (
+                            <option key={b} value={b}>
+                              Pindahkan ke: {b}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={handleDeleteBay}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl border border-rose-200 transition-colors cursor-pointer"
+                      onClick={() => setIsConfirmingDelete(false)}
+                      className="px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200 bg-white border border-slate-300 rounded-xl transition-colors cursor-pointer"
                     >
-                      <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                      <span>Hapus Bay Ini</span>
+                      Batal
                     </button>
-                  )}
+                    <button
+                      type="button"
+                      onClick={handleExecuteDeleteBay}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-black text-white bg-rose-600 hover:bg-rose-700 active:scale-95 rounded-xl shadow-md shadow-rose-600/30 transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Ya, Hapus Bay Sekarang</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2.5 text-xs font-black bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md shadow-blue-500/20 transition-all cursor-pointer"
-                  >
-                    Simpan Perubahan Bay
-                  </button>
+              ) : (
+                <div className="flex items-center justify-between gap-2 pt-2">
+                  <div>
+                    {existingBays.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={handleInitiateDeleteBay}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl border border-rose-200 transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Hapus Bay Ini</span>
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2.5 text-xs font-black bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md shadow-blue-500/20 transition-all cursor-pointer"
+                    >
+                      Simpan Perubahan Bay
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </form>
           )}
 

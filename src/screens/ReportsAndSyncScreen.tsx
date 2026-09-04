@@ -35,6 +35,7 @@ export const ReportsAndSyncScreen: React.FC = () => {
     updateSettings,
     syncWithGoogleSheets,
     syncAllDataToCloud,
+    fetchDataFromCloud,
     isCloudConnected,
     isCloudLoaded,
     resetToInitialData,
@@ -180,7 +181,21 @@ export const ReportsAndSyncScreen: React.FC = () => {
             </div>
           </div>
 
-          {isAdmin ? (
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0 w-full sm:w-auto">
+            <button
+              onClick={async () => {
+                setIsSyncingCloud(true);
+                await fetchDataFromCloud();
+                setIsSyncingCloud(false);
+              }}
+              disabled={isSyncingCloud}
+              className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 active:scale-95 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 rounded-2xl font-bold text-xs shadow-xs transition-all disabled:opacity-50 min-h-[44px]"
+              title="Tarik dan perbarui data dari Cloud Firestore ke perangkat ini"
+            >
+              <Download className="w-4 h-4 text-sky-600" />
+              <span>Tarik Data Cloud</span>
+            </button>
+
             <button
               onClick={async () => {
                 setIsSyncingCloud(true);
@@ -188,16 +203,13 @@ export const ReportsAndSyncScreen: React.FC = () => {
                 setIsSyncingCloud(false);
               }}
               disabled={isSyncingCloud}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white rounded-2xl font-bold text-xs shadow-md shadow-sky-500/25 transition-all disabled:opacity-50 min-h-[44px] shrink-0 w-full sm:w-auto"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white rounded-2xl font-bold text-xs shadow-md shadow-sky-500/25 transition-all disabled:opacity-50 min-h-[44px]"
+              title="Unggah dan simpan seluruh data lokal ke Cloud Firestore"
             >
-              <RefreshCw className={`w-4 h-4 ${isSyncingCloud ? 'animate-spin' : ''}`} />
-              <span>{isSyncingCloud ? 'Menyinkronkan...' : 'Sinkronkan & Kunci ke Cloud Sekarang'}</span>
+              <Upload className={`w-4 h-4 ${isSyncingCloud ? 'animate-bounce' : ''}`} />
+              <span>{isSyncingCloud ? 'Menyinkronkan...' : 'Sinkronkan ke Cloud'}</span>
             </button>
-          ) : (
-            <div className="text-xs text-slate-500 italic bg-slate-50 dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
-              Sinkronisasi Cloud dikendalikan otomatis oleh Kepala Ruangan
-            </div>
-          )}
+          </div>
         </div>
 
         {/* Cloud Status Stats */}

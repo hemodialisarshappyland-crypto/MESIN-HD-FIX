@@ -1,6 +1,6 @@
 export type NurseRole = 'KARU' | 'KATIM' | 'PELAKSANA';
 
-export type HeadNurseReportFormat = 'LENGKAP_MESIN' | 'RINGKAS' | 'NAMA_PERAWAT';
+export type HeadNurseReportFormat = 'RINGKAS' | 'NAMA_PERAWAT';
 
 export interface NurseRoleInfo {
   title: string;

@@ -390,39 +390,89 @@ export class WhatsAppDispatcher {
   }
 
   /**
-   * Helper to format machine codes summary cleanly (e.g. M-01 s/d M-04 (4 mesin)).
+   * Helper to format machine codes summary cleanly (e.g. A01 s/d A03 (3 mesin) or C03 s/d B01 (3 mesin)).
    */
-  static formatMachineSummary(machineCodes: string[]): string {
-    if (machineCodes.length === 0) return 'Belum ada mesin';
-    if (machineCodes.length <= 2) return `${machineCodes.join(', ')} (${machineCodes.length} mesin)`;
+  static formatMachineSummary(machineCodes: string[], allSortedMachines?: Machine[]): string {
+    if (!machineCodes || machineCodes.length === 0) return 'Belum ada alokasi mesin';
+    if (machineCodes.length === 1) return `${machineCodes[0]} (1 mesin)`;
 
-    const nums = machineCodes.map((c) => parseInt(c.replace(/\D/g, ''), 10)).filter((n) => !isNaN(n));
-    let isContiguous = nums.length === machineCodes.length;
-    if (isContiguous) {
-      for (let i = 0; i < nums.length - 1; i++) {
-        if (nums[i + 1] !== nums[i] + 1) {
-          isContiguous = false;
-          break;
+    // 1. Check if all machines are strictly contiguous in physical layout order
+    if (allSortedMachines && allSortedMachines.length > 0) {
+      const indices = machineCodes.map((code) =>
+        allSortedMachines.findIndex(
+          (m) => m.code && m.code.toLowerCase() === code.toLowerCase()
+        )
+      );
+      const allFound = indices.every((idx) => idx !== -1);
+      if (allFound) {
+        let isLayoutContiguous = true;
+        for (let i = 0; i < indices.length - 1; i++) {
+          if (indices[i + 1] !== indices[i] + 1) {
+            isLayoutContiguous = false;
+            break;
+          }
+        }
+        if (isLayoutContiguous) {
+          return `${machineCodes[0]} s/d ${machineCodes[machineCodes.length - 1]} (${machineCodes.length} mesin)`;
         }
       }
     }
 
-    if (isContiguous && machineCodes.length >= 3) {
-      return `${machineCodes[0]} s/d ${machineCodes[machineCodes.length - 1]} (${machineCodes.length} mesin)`;
+    // 2. Check if all machines have the same prefix and consecutive numbers
+    const firstPrefix = machineCodes[0].replace(/\d+$/, '');
+    const allSamePrefix = machineCodes.every((c) => c.replace(/\d+$/, '') === firstPrefix);
+    if (allSamePrefix) {
+      const nums = machineCodes.map((c) => parseInt(c.replace(/\D/g, ''), 10));
+      let isNumContiguous = nums.every((n) => !isNaN(n));
+      if (isNumContiguous) {
+        for (let i = 0; i < nums.length - 1; i++) {
+          if (nums[i + 1] !== nums[i] + 1) {
+            isNumContiguous = false;
+            break;
+          }
+        }
+        if (isNumContiguous) {
+          return `${machineCodes[0]} s/d ${machineCodes[machineCodes.length - 1]} (${machineCodes.length} mesin)`;
+        }
+      }
     }
-    return `${machineCodes.join(', ')} (${machineCodes.length} mesin)`;
+
+    // 3. Fallback: group contiguous sub-ranges
+    const groups: string[] = [];
+    let currentGroup: string[] = [machineCodes[0]];
+
+    for (let i = 1; i < machineCodes.length; i++) {
+      const prev = machineCodes[i - 1];
+      const curr = machineCodes[i];
+      const prevPrefix = prev.replace(/\d+$/, '');
+      const currPrefix = curr.replace(/\d+$/, '');
+      const prevNum = parseInt(prev.replace(/\D/g, ''), 10);
+      const currNum = parseInt(curr.replace(/\D/g, ''), 10);
+
+      if (prevPrefix === currPrefix && !isNaN(prevNum) && !isNaN(currNum) && currNum === prevNum + 1) {
+        currentGroup.push(curr);
+      } else {
+        if (currentGroup.length === 1) {
+          groups.push(currentGroup[0]);
+        } else {
+          groups.push(`${currentGroup[0]} s/d ${currentGroup[currentGroup.length - 1]}`);
+        }
+        currentGroup = [curr];
+      }
+    }
+
+    if (currentGroup.length === 1) {
+      groups.push(currentGroup[0]);
+    } else {
+      groups.push(`${currentGroup[0]} s/d ${currentGroup[currentGroup.length - 1]}`);
+    }
+
+    return `${groups.join(', ')} (${machineCodes.length} mesin)`;
   }
 
   /**
-   * Creates comprehensive daily machine allocation report specifically for Head Nurse (Kepala Ruangan).
-   * Formats the list of staff ordered by their machine allocations (e.g. nurse with M-01 first, then M-05, etc.).
-   */
-  /**
    * Creates daily machine allocation report specifically for Head Nurse (Kepala Ruangan).
-   * Supports 3 formats:
-   * 1. 'LENGKAP_MESIN': Detailed report ordered by machine allocations (M-01 upwards)
-   * 2. 'RINGKAS': Compact 1-liner format, optimized for quick WhatsApp scanning
-   * 3. 'NAMA_PERAWAT': Ordered alphabetically by nurse name (A-Z) per shift
+   * Default format is 'RINGKAS' (Ringkasan Jadwal & Alokasi Mesin HD).
    */
   static generateHeadNurseDailyAllocationMessage(
     dateStr: string,
@@ -431,18 +481,8 @@ export class WhatsAppDispatcher {
     hospitalName: string = 'RS Happy Land Medical Centre',
     roomName: string = 'Ruang Dialisis Gedung Timur Lt.3',
     headNurseName: string = 'Kepala Ruang HD',
-    formatMode: HeadNurseReportFormat = 'LENGKAP_MESIN'
+    formatMode: HeadNurseReportFormat = 'RINGKAS'
   ): string {
-    if (formatMode === 'RINGKAS') {
-      return this.generateHeadNurseCompactReport(
-        dateStr,
-        assignments,
-        machines,
-        hospitalName,
-        roomName,
-        headNurseName
-      );
-    }
     if (formatMode === 'NAMA_PERAWAT') {
       return this.generateHeadNurseNurseOrderReport(
         dateStr,
@@ -453,18 +493,19 @@ export class WhatsAppDispatcher {
         headNurseName
       );
     }
-    return this.generateHeadNurseMachineOrderReport(
+    return this.generateHeadNurseCompactReport(
       dateStr,
       assignments,
       machines,
       hospitalName,
       roomName,
-      headNurseName
+      headNurseName,
+      false
     );
   }
 
   /**
-   * Format 1: Format Lengkap (Urut Alokasi Mesin)
+   * Alias untuk kompatibilitas ke format laporan Karu
    */
   static generateHeadNurseMachineOrderReport(
     dateStr: string,
@@ -474,148 +515,20 @@ export class WhatsAppDispatcher {
     roomName: string = 'Ruang Dialisis Gedung Timur Lt.3',
     headNurseName: string = 'Kepala Ruang HD'
   ): string {
-    const formattedDate = this.formatIndonesianDate(dateStr);
-    const activeMachines = machines.filter((m) => m.status === 'AKTIF');
-    const unusedMachines = machines.filter((m) => m.status === 'TIDAK_DIGUNAKAN');
-    const maintMachines = machines.filter((m) => m.status === 'MAINTENANCE');
-    const brokenMachines = machines.filter((m) => m.status === 'RUSAK');
-    const nonActiveMachines = machines.filter((m) => m.status !== 'AKTIF');
-
-    const sb: string[] = [];
-    sb.push('📋 *LAPORAN HARIAN PEMBAGIAN MESIN & SIF HEMODIALISA*');
-    sb.push(`🏥 *${hospitalName}*`);
-    sb.push(`📍 ${roomName}`);
-    sb.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-    sb.push(`Kepada Yth. *${headNurseName || 'Kepala Ruang Hemodialisa'}*`);
-    sb.push(`📅 *Hari / Tanggal:* ${formattedDate}`);
-
-    let capDetails = `📟 *Kapasitas Mesin:* ${machines.length} Mesin Total (${activeMachines.length} Aktif Beroperasi`;
-    if (unusedMachines.length > 0) capDetails += `, ${unusedMachines.length} Tidak Digunakan`;
-    if (maintMachines.length > 0) capDetails += `, ${maintMachines.length} Maintenance`;
-    if (brokenMachines.length > 0) capDetails += `, ${brokenMachines.length} Rusak`;
-    capDetails += ')\n';
-    sb.push(capDetails);
-
-    // 1. SIF PAGI
-    const pagiAssignments = this.sortAssignmentsByMachineOrder(
-      assignments.filter((a) => a.shiftType === 'PAGI'),
-      machines
+    return this.generateHeadNurseCompactReport(
+      dateStr,
+      assignments,
+      machines,
+      hospitalName,
+      roomName,
+      headNurseName,
+      false
     );
-    const pagiLeader = pagiAssignments.find((a) => a.isLeader);
-
-    sb.push('🌅 *SIF PAGI (07.00 - 14.00 WIB)*');
-    if (pagiLeader) {
-      sb.push(`👑 *PJ Sif:* ${pagiLeader.nurseName}`);
-    }
-    sb.push(`👥 *Jumlah Perawat Dinas:* ${pagiAssignments.length} Orang`);
-    sb.push('📊 *Rincian Alokasi Mesin per Perawat (Urut Alokasi Mesin):*');
-    if (pagiAssignments.length === 0) {
-      sb.push('   _(Belum ada jadwal sif pagi terdata)_');
-    } else {
-      pagiAssignments.forEach((assign, idx) => {
-        const roleTag = assign.isLeader ? ' (PJ Sif)' : '';
-        const dutyTag = assign.specialDuty ? ` [PIC: ${assign.specialDuty}]` : '';
-        const sortedList = this.getAssignedMachinesForAssignment(assign, machines);
-        const mCodes = sortedList.map((m) => m.code).join(', ');
-        const mSummary =
-          sortedList.length > 0
-            ? `${mCodes} (${sortedList.length} mesin)`
-            : 'Belum ada mesin';
-        sb.push(`   ${idx + 1}. *${assign.nurseName}*${roleTag}${dutyTag}`);
-        sb.push(`      ↳ Alokasi: ${mSummary}`);
-      });
-    }
-    sb.push('');
-
-    // 2. SIF SIANG
-    const siangAssignments = this.sortAssignmentsByMachineOrder(
-      assignments.filter((a) => a.shiftType === 'SIANG'),
-      machines
-    );
-    const siangLeader = siangAssignments.find((a) => a.isLeader);
-
-    sb.push('🌇 *SIF SIANG (12.00 - 19.00 WIB)*');
-    if (siangLeader) {
-      sb.push(`👑 *PJ Sif:* ${siangLeader.nurseName}`);
-    }
-    sb.push(`👥 *Jumlah Perawat Dinas:* ${siangAssignments.length} Orang`);
-    sb.push('📊 *Rincian Alokasi Mesin per Perawat (Urut Alokasi Mesin):*');
-    if (siangAssignments.length === 0) {
-      sb.push('   _(Belum ada jadwal sif siang terdata)_');
-    } else {
-      siangAssignments.forEach((assign, idx) => {
-        const roleTag = assign.isLeader ? ' (PJ Sif)' : '';
-        const dutyTag = assign.specialDuty ? ` [PIC: ${assign.specialDuty}]` : '';
-        const sortedList = this.getAssignedMachinesForAssignment(assign, machines);
-        const mCodes = sortedList.map((m) => m.code).join(', ');
-        const mSummary =
-          sortedList.length > 0
-            ? `${mCodes} (${sortedList.length} mesin)`
-            : 'Belum ada mesin';
-        sb.push(`   ${idx + 1}. *${assign.nurseName}*${roleTag}${dutyTag}`);
-        sb.push(`      ↳ Alokasi: ${mSummary}`);
-      });
-    }
-    sb.push('');
-
-    // 3. PENANGGUNG JAWAB KHUSUS (PIC) BERTUGAS HARI INI
-    const onDutyMap = new Map<string, { nurseName: string; shiftType: string }[]>();
-    assignments.forEach((a) => {
-      if (a.specialDuty && (a.shiftType === 'PAGI' || a.shiftType === 'SIANG')) {
-        const duties = parseSpecialDuties(a.specialDuty);
-        duties.forEach((d) => {
-          if (!onDutyMap.has(d)) onDutyMap.set(d, []);
-          onDutyMap.get(d)!.push({ nurseName: a.nurseName, shiftType: a.shiftType });
-        });
-      }
-    });
-    if (onDutyMap.size > 0) {
-      sb.push('🏷️ *PENANGGUNG JAWAB KHUSUS (PIC) BERTUGAS HARI INI:*');
-      onDutyMap.forEach((holders, duty) => {
-        const holderStr = holders.map((h) => `${h.nurseName} (Sif ${h.shiftType})`).join(', ');
-        sb.push(`• *${duty}:* ${holderStr}`);
-      });
-      sb.push('');
-    }
-
-    // 4. STATUS LIBUR / CUTI / SAKIT
-    const offList = assignments.filter((a) => a.shiftType === 'LIBUR');
-    const cutiList = assignments.filter((a) => a.shiftType === 'CUTI');
-    const sakitList = assignments.filter((a) => a.shiftType === 'SAKIT');
-
-    if (offList.length > 0 || cutiList.length > 0 || sakitList.length > 0) {
-      sb.push('🌴 *STATUS TIDAK BERDINAS:*');
-      if (offList.length > 0) {
-        sb.push(`• Libur/Off (${offList.length}): ${offList.map((a) => a.nurseName).join(', ')}`);
-      }
-      if (cutiList.length > 0) {
-        sb.push(`• Cuti (${cutiList.length}): ${cutiList.map((a) => a.nurseName).join(', ')}`);
-      }
-      if (sakitList.length > 0) {
-        sb.push(`• Sakit/Izin (${sakitList.length}): ${sakitList.map((a) => a.nurseName).join(', ')}`);
-      }
-      sb.push('');
-    }
-
-    // 5. STATUS MESIN NON-AKTIF
-    if (nonActiveMachines.length > 0) {
-      sb.push('⚠️ *STATUS MESIN NON-AKTIF / STANDBY / MAINTENANCE:*');
-      nonActiveMachines.forEach((m) => {
-        const noteStr = m.notes ? ` [${m.notes}]` : '';
-        sb.push(`• ${m.code} (${m.name}) - *${m.status}*${noteStr}`);
-      });
-      sb.push('');
-    }
-
-    sb.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    sb.push('_Laporan otomatis dibuat dari Sistem Jadwal & Alokasi HemoShift HD._');
-
-    return sb.join('\n');
   }
 
   /**
-   * Format 2: Format Ringkas (Padat, 1-Liner, Cepat Dibaca di HP)
+   * Format Ringkasan Jadwal & Alokasi Mesin HD untuk Kepala Ruangan (Karu).
+   * Format pelaporan terpadu sesuai standar RS Happy Land Medical Centre.
    */
   static generateHeadNurseCompactReport(
     dateStr: string,
@@ -623,111 +536,160 @@ export class WhatsAppDispatcher {
     machines: Machine[],
     hospitalName: string = 'RS Happy Land Medical Centre',
     roomName: string = 'Ruang Dialisis Gedung Timur Lt.3',
-    headNurseName: string = 'Kepala Ruang HD'
+    headNurseName: string = 'Kepala Ruang HD',
+    sortByName: boolean = false
   ): string {
     const formattedDate = this.formatIndonesianDate(dateStr);
+    const sortedAllMachines = this.getSortedMachines(machines);
     const nonActiveMachines = machines.filter((m) => m.status !== 'AKTIF');
 
     const sb: string[] = [];
     sb.push('📋 *RINGKASAN JADWAL & ALOKASI MESIN HD*');
     sb.push(`🏥 *${hospitalName}* • ${roomName}`);
     sb.push(`📅 *${formattedDate}*`);
-    sb.push(`Kepada Yth. *${headNurseName || 'Kepala Ruang'}*`);
+    const cleanKaru = (headNurseName || 'Kepala Ruang HD').trim();
+    sb.push(`Kepada Yth. *${cleanKaru}*`);
     sb.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     // 1. SIF PAGI
-    const pagiAssignments = this.sortAssignmentsByMachineOrder(
-      assignments.filter((a) => a.shiftType === 'PAGI'),
-      machines
-    );
+    let pagiAssignments = assignments.filter((a) => a.shiftType === 'PAGI');
+    if (sortByName) {
+      pagiAssignments = [...pagiAssignments].sort((a, b) =>
+        a.nurseName.localeCompare(b.nurseName, undefined, { sensitivity: 'base' })
+      );
+    } else {
+      pagiAssignments = this.sortAssignmentsByMachineOrder(pagiAssignments, machines);
+    }
     const pagiLeader = pagiAssignments.find((a) => a.isLeader);
-    const pagiHeader = `🌅 *SIF PAGI* (${pagiAssignments.length} Staf${pagiLeader ? ` | PJ: ${pagiLeader.nurseName}` : ''})`;
-    sb.push(pagiHeader);
+
+    sb.push(`🌅 *SIF PAGI* (${pagiAssignments.length} Staf)`);
     if (pagiAssignments.length === 0) {
-      sb.push('• _(Tidak ada dinas pagi)_');
+      sb.push('   _(Belum ada perawat dinas pagi)_');
     } else {
       pagiAssignments.forEach((assign, idx) => {
-        const leaderMark = assign.isLeader ? ' *(PJ)*' : '';
-        const dutyMark = assign.specialDuty ? ` *[PIC: ${assign.specialDuty}]*` : '';
         const sortedList = this.getAssignedMachinesForAssignment(assign, machines);
         const codes = sortedList.map((m) => m.code);
-        const summary = this.formatMachineSummary(codes);
-        sb.push(`${idx + 1}. *${assign.nurseName}*${leaderMark}${dutyMark}: ${summary}`);
+        const summary = this.formatMachineSummary(codes, sortedAllMachines);
+        sb.push(`${idx + 1}. *${assign.nurseName.toUpperCase()}* : ${summary}`);
       });
     }
     sb.push('');
 
     // 2. SIF SIANG
-    const siangAssignments = this.sortAssignmentsByMachineOrder(
-      assignments.filter((a) => a.shiftType === 'SIANG'),
-      machines
-    );
+    let siangAssignments = assignments.filter((a) => a.shiftType === 'SIANG');
+    if (sortByName) {
+      siangAssignments = [...siangAssignments].sort((a, b) =>
+        a.nurseName.localeCompare(b.nurseName, undefined, { sensitivity: 'base' })
+      );
+    } else {
+      siangAssignments = this.sortAssignmentsByMachineOrder(siangAssignments, machines);
+    }
     const siangLeader = siangAssignments.find((a) => a.isLeader);
-    const siangHeader = `🌇 *SIF SIANG* (${siangAssignments.length} Staf${siangLeader ? ` | PJ: ${siangLeader.nurseName}` : ''})`;
-    sb.push(siangHeader);
+
+    sb.push(`🌇 *SIF SIANG* (${siangAssignments.length} Staf)`);
     if (siangAssignments.length === 0) {
-      sb.push('• _(Tidak ada dinas siang)_');
+      sb.push('   _(Belum ada perawat dinas siang)_');
     } else {
       siangAssignments.forEach((assign, idx) => {
-        const leaderMark = assign.isLeader ? ' *(PJ)*' : '';
-        const dutyMark = assign.specialDuty ? ` *[PIC: ${assign.specialDuty}]*` : '';
         const sortedList = this.getAssignedMachinesForAssignment(assign, machines);
         const codes = sortedList.map((m) => m.code);
-        const summary = this.formatMachineSummary(codes);
-        sb.push(`${idx + 1}. *${assign.nurseName}*${leaderMark}${dutyMark}: ${summary}`);
+        const summary = this.formatMachineSummary(codes, sortedAllMachines);
+        sb.push(`${idx + 1}. *${assign.nurseName.toUpperCase()}* : ${summary}`);
       });
     }
     sb.push('');
 
-    // 3. TUGAS KHUSUS / PIC HARI INI
-    const onDutyMap = new Map<string, { nurseName: string; shiftType: string }[]>();
-    assignments.forEach((a) => {
-      if (a.specialDuty && (a.shiftType === 'PAGI' || a.shiftType === 'SIANG')) {
+    // 3. TUGAS KHUSUS / PIC HARI INI (Terpisah Sif Pagi & Sif Siang)
+    sb.push('🏷️ *TUGAS KHUSUS / PIC HARI INI:*');
+
+    // SIF PAGI
+    sb.push('*SIF PAGI*');
+    const pagiDutyMap = new Map<string, string[]>();
+    pagiAssignments.forEach((a) => {
+      if (a.specialDuty) {
         const duties = parseSpecialDuties(a.specialDuty);
         duties.forEach((d) => {
-          if (!onDutyMap.has(d)) onDutyMap.set(d, []);
-          onDutyMap.get(d)!.push({
-            nurseName: a.nurseName,
-            shiftType: a.shiftType === 'PAGI' ? 'Pagi' : 'Siang',
-          });
+          const cleanD = d.trim();
+          if (!pagiDutyMap.has(cleanD)) pagiDutyMap.set(cleanD, []);
+          pagiDutyMap.get(cleanD)!.push(a.nurseName.toUpperCase());
         });
       }
     });
-    if (onDutyMap.size > 0) {
-      sb.push('🏷️ *TUGAS KHUSUS / PIC HARI INI:*');
-      onDutyMap.forEach((holders, duty) => {
-        const holderStr = holders.map((h) => `${h.nurseName} (${h.shiftType})`).join(', ');
-        sb.push(`• *${duty}:* ${holderStr}`);
-      });
-      sb.push('');
-    }
 
-    // 4. Tidak Berdinas
+    let hasPagiSpecial = false;
+    if (pagiLeader) {
+      sb.push(`• *PJ SIF :* ${pagiLeader.nurseName.toUpperCase()}`);
+      hasPagiSpecial = true;
+    }
+    pagiDutyMap.forEach((holders, duty) => {
+      sb.push(`• *${duty.toUpperCase()} :* ${holders.join(' + ')}`);
+      hasPagiSpecial = true;
+    });
+    if (!hasPagiSpecial) {
+      sb.push('• _(Tidak ada penugasan khusus)_');
+    }
+    sb.push('');
+
+    // SIF SIANG
+    sb.push('*SIF SIANG*');
+    const siangDutyMap = new Map<string, string[]>();
+    siangAssignments.forEach((a) => {
+      if (a.specialDuty) {
+        const duties = parseSpecialDuties(a.specialDuty);
+        duties.forEach((d) => {
+          const cleanD = d.trim();
+          if (!siangDutyMap.has(cleanD)) siangDutyMap.set(cleanD, []);
+          siangDutyMap.get(cleanD)!.push(a.nurseName.toUpperCase());
+        });
+      }
+    });
+
+    let hasSiangSpecial = false;
+    if (siangLeader) {
+      sb.push(`• *PJ SIF :* ${siangLeader.nurseName.toUpperCase()}`);
+      hasSiangSpecial = true;
+    }
+    siangDutyMap.forEach((holders, duty) => {
+      sb.push(`• *${duty.toUpperCase()} :* ${holders.join(' + ')}`);
+      hasSiangSpecial = true;
+    });
+    if (!hasSiangSpecial) {
+      sb.push('• _(Tidak ada penugasan khusus)_');
+    }
+    sb.push('');
+
+    // 4. STATUS OFF / CUTI / SAKIT
     const offList = assignments.filter((a) => a.shiftType === 'LIBUR');
     const cutiList = assignments.filter((a) => a.shiftType === 'CUTI');
     const sakitList = assignments.filter((a) => a.shiftType === 'SAKIT');
     const nonDutyParts: string[] = [];
-    if (offList.length > 0) nonDutyParts.push(`Libur: ${offList.map((a) => a.nurseName).join(', ')}`);
-    if (cutiList.length > 0) nonDutyParts.push(`Cuti: ${cutiList.map((a) => a.nurseName).join(', ')}`);
-    if (sakitList.length > 0) nonDutyParts.push(`Sakit: ${sakitList.map((a) => a.nurseName).join(', ')}`);
+    if (offList.length > 0) {
+      nonDutyParts.push(`Libur: ${offList.map((a) => a.nurseName.toUpperCase()).join(', ')}`);
+    }
+    if (cutiList.length > 0) {
+      nonDutyParts.push(`Cuti: ${cutiList.map((a) => a.nurseName.toUpperCase()).join(', ')}`);
+    }
+    if (sakitList.length > 0) {
+      nonDutyParts.push(`Sakit: ${sakitList.map((a) => a.nurseName.toUpperCase()).join(', ')}`);
+    }
     if (nonDutyParts.length > 0) {
-      sb.push(`🌴 *Off/Cuti:* ${nonDutyParts.join(' | ')}`);
+      sb.push(`🌴 *Off/Cuti :* ${nonDutyParts.join(' | ')}`);
     }
 
-    // 5. Mesin Non Aktif
+    // 5. MESIN NON-AKTIF
     if (nonActiveMachines.length > 0) {
-      const nonActiveStr = nonActiveMachines.map((m) => `${m.code} (${m.status})`).join(', ');
-      sb.push(`⚠️ *Mesin Non-Aktif:* ${nonActiveStr}`);
+      const nonActiveStr = nonActiveMachines.map((m) => m.code).join(', ');
+      sb.push(`\n⚠️ *Mesin Non-Aktif :* ${nonActiveStr}.`);
     }
 
     sb.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    sb.push('_HemoShift HD - Ringkasan Cepat_');
+    sb.push('_HemoShift HD - HD RS HAPPY LAND_');
 
     return sb.join('\n');
   }
 
   /**
-   * Format 3: Format Berdasarkan Nama Perawat (Urut Alfabetis A-Z per Sif)
+   * Format Urut Nama Perawat (A-Z) per Sif.
    */
   static generateHeadNurseNurseOrderReport(
     dateStr: string,
@@ -737,142 +699,15 @@ export class WhatsAppDispatcher {
     roomName: string = 'Ruang Dialisis Gedung Timur Lt.3',
     headNurseName: string = 'Kepala Ruang HD'
   ): string {
-    const formattedDate = this.formatIndonesianDate(dateStr);
-    const activeMachines = machines.filter((m) => m.status === 'AKTIF');
-    const unusedMachines = machines.filter((m) => m.status === 'TIDAK_DIGUNAKAN');
-    const maintMachines = machines.filter((m) => m.status === 'MAINTENANCE');
-    const brokenMachines = machines.filter((m) => m.status === 'RUSAK');
-    const nonActiveMachines = machines.filter((m) => m.status !== 'AKTIF');
-
-    const sb: string[] = [];
-    sb.push('📋 *LAPORAN ALOKASI DINAS HD (URUT NAMA PERAWAT A-Z)*');
-    sb.push(`🏥 *${hospitalName}*`);
-    sb.push(`📍 ${roomName}`);
-    sb.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-    sb.push(`Kepada Yth. *${headNurseName || 'Kepala Ruang Hemodialisa'}*`);
-    sb.push(`📅 *Hari / Tanggal:* ${formattedDate}`);
-
-    let capDetails = `📟 *Kapasitas Mesin:* ${machines.length} Mesin Total (${activeMachines.length} Aktif Beroperasi`;
-    if (unusedMachines.length > 0) capDetails += `, ${unusedMachines.length} Tidak Digunakan`;
-    if (maintMachines.length > 0) capDetails += `, ${maintMachines.length} Maintenance`;
-    if (brokenMachines.length > 0) capDetails += `, ${brokenMachines.length} Rusak`;
-    capDetails += ')\n';
-    sb.push(capDetails);
-
-    // 1. SIF PAGI - Sorted alphabetically by nurseName
-    const pagiAssignments = [...assignments.filter((a) => a.shiftType === 'PAGI')].sort((a, b) =>
-      a.nurseName.localeCompare(b.nurseName)
+    return this.generateHeadNurseCompactReport(
+      dateStr,
+      assignments,
+      machines,
+      hospitalName,
+      roomName,
+      headNurseName,
+      true
     );
-    const pagiLeader = pagiAssignments.find((a) => a.isLeader);
-
-    sb.push('🌅 *SIF PAGI (07.00 - 14.00 WIB)* - Urut Nama (A-Z)');
-    if (pagiLeader) {
-      sb.push(`👑 *PJ Sif:* ${pagiLeader.nurseName}`);
-    }
-    sb.push(`👥 *Jumlah Perawat Dinas:* ${pagiAssignments.length} Orang`);
-    sb.push('📊 *Daftar Alokasi Mesin per Perawat:*');
-    if (pagiAssignments.length === 0) {
-      sb.push('   _(Belum ada jadwal sif pagi terdata)_');
-    } else {
-      pagiAssignments.forEach((assign, idx) => {
-        const roleTag = assign.isLeader ? ' (PJ Sif)' : '';
-        const dutyTag = assign.specialDuty ? ` [PIC: ${assign.specialDuty}]` : '';
-        const sortedList = this.getAssignedMachinesForAssignment(assign, machines);
-        const mCodes = sortedList.map((m) => m.code).join(', ');
-        const mSummary =
-          sortedList.length > 0
-            ? `${mCodes} (${sortedList.length} mesin)`
-            : 'Belum ada mesin';
-        sb.push(`   ${idx + 1}. *${assign.nurseName}*${roleTag}${dutyTag}`);
-        sb.push(`      ↳ Alokasi: ${mSummary}`);
-      });
-    }
-    sb.push('');
-
-    // 2. SIF SIANG - Sorted alphabetically by nurseName
-    const siangAssignments = [...assignments.filter((a) => a.shiftType === 'SIANG')].sort((a, b) =>
-      a.nurseName.localeCompare(b.nurseName)
-    );
-    const siangLeader = siangAssignments.find((a) => a.isLeader);
-
-    sb.push('🌇 *SIF SIANG (12.00 - 19.00 WIB)* - Urut Nama (A-Z)');
-    if (siangLeader) {
-      sb.push(`👑 *PJ Sif:* ${siangLeader.nurseName}`);
-    }
-    sb.push(`👥 *Jumlah Perawat Dinas:* ${siangAssignments.length} Orang`);
-    sb.push('📊 *Daftar Alokasi Mesin per Perawat:*');
-    if (siangAssignments.length === 0) {
-      sb.push('   _(Belum ada jadwal sif siang terdata)_');
-    } else {
-      siangAssignments.forEach((assign, idx) => {
-        const roleTag = assign.isLeader ? ' (PJ Sif)' : '';
-        const dutyTag = assign.specialDuty ? ` [PIC: ${assign.specialDuty}]` : '';
-        const sortedList = this.getAssignedMachinesForAssignment(assign, machines);
-        const mCodes = sortedList.map((m) => m.code).join(', ');
-        const mSummary =
-          sortedList.length > 0
-            ? `${mCodes} (${sortedList.length} mesin)`
-            : 'Belum ada mesin';
-        sb.push(`   ${idx + 1}. *${assign.nurseName}*${roleTag}${dutyTag}`);
-        sb.push(`      ↳ Alokasi: ${mSummary}`);
-      });
-    }
-    sb.push('');
-
-    // 3. PENANGGUNG JAWAB KHUSUS (PIC)
-    const onDutyMap = new Map<string, { nurseName: string; shiftType: string }[]>();
-    assignments.forEach((a) => {
-      if (a.specialDuty && (a.shiftType === 'PAGI' || a.shiftType === 'SIANG')) {
-        const duties = parseSpecialDuties(a.specialDuty);
-        duties.forEach((d) => {
-          if (!onDutyMap.has(d)) onDutyMap.set(d, []);
-          onDutyMap.get(d)!.push({ nurseName: a.nurseName, shiftType: a.shiftType });
-        });
-      }
-    });
-    if (onDutyMap.size > 0) {
-      sb.push('🏷️ *PENANGGUNG JAWAB KHUSUS (PIC) BERTUGAS HARI INI:*');
-      onDutyMap.forEach((holders, duty) => {
-        const holderStr = holders.map((h) => `${h.nurseName} (Sif ${h.shiftType})`).join(', ');
-        sb.push(`• *${duty}:* ${holderStr}`);
-      });
-      sb.push('');
-    }
-
-    // 4. Libur / Cuti / Sakit
-    const offList = assignments.filter((a) => a.shiftType === 'LIBUR');
-    const cutiList = assignments.filter((a) => a.shiftType === 'CUTI');
-    const sakitList = assignments.filter((a) => a.shiftType === 'SAKIT');
-
-    if (offList.length > 0 || cutiList.length > 0 || sakitList.length > 0) {
-      sb.push('🌴 *STATUS TIDAK BERDINAS:*');
-      if (offList.length > 0) {
-        sb.push(`• Libur/Off (${offList.length}): ${offList.map((a) => a.nurseName).sort().join(', ')}`);
-      }
-      if (cutiList.length > 0) {
-        sb.push(`• Cuti (${cutiList.length}): ${cutiList.map((a) => a.nurseName).sort().join(', ')}`);
-      }
-      if (sakitList.length > 0) {
-        sb.push(`• Sakit/Izin (${sakitList.length}): ${sakitList.map((a) => a.nurseName).sort().join(', ')}`);
-      }
-      sb.push('');
-    }
-
-    // 5. Mesin Non Aktif
-    if (nonActiveMachines.length > 0) {
-      sb.push('⚠️ *STATUS MESIN NON-AKTIF / STANDBY / MAINTENANCE:*');
-      nonActiveMachines.forEach((m) => {
-        const noteStr = m.notes ? ` [${m.notes}]` : '';
-        sb.push(`• ${m.code} (${m.name}) - *${m.status}*${noteStr}`);
-      });
-      sb.push('');
-    }
-
-    sb.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    sb.push('_Laporan otomatis dibuat dari Sistem Jadwal & Alokasi HemoShift HD._');
-
-    return sb.join('\n');
   }
 
   /**

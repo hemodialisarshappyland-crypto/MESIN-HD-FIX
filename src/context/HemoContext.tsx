@@ -24,6 +24,8 @@ import {
   setDoc,
   deleteDoc,
   writeBatch,
+  getDocs,
+  getDoc,
 } from 'firebase/firestore';
 
 export interface HemoContextType {
@@ -45,6 +47,7 @@ export interface HemoContextType {
   isCloudConnected: boolean;
   isCloudLoaded: boolean;
   syncAllDataToCloud: () => Promise<boolean>;
+  fetchDataFromCloud: () => Promise<{ success: boolean; nurses: number; machines: number; assignments: number }>;
   toastMessage: string | null;
   showToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
   clearToast: () => void;
@@ -201,16 +204,22 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ];
 
   const [bays, setBays] = useState<string[]>(() => {
+    const deletedBays = new Set<string>(
+      JSON.parse(localStorage.getItem('hemo_deleted_bays_v1') || '[]').map((b: string) => b.trim().toLowerCase())
+    );
     const saved = localStorage.getItem('hemo_custom_bays_v1');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return Array.from(new Set([...DEFAULT_BAYS, ...parsed.filter(Boolean)]));
+          const filtered = parsed
+            .map((b: string) => (typeof b === 'string' ? b.trim() : ''))
+            .filter((b: string) => Boolean(b) && !deletedBays.has(b.toLowerCase()));
+          if (filtered.length > 0) return Array.from(new Set(filtered));
         }
       } catch {}
     }
-    return DEFAULT_BAYS;
+    return DEFAULT_BAYS.filter((b) => !deletedBays.has(b.trim().toLowerCase()));
   });
 
   const [machines, setMachines] = useState<Machine[]>(() => {
@@ -296,11 +305,18 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     localStorage.setItem('hemo_machines_v1', JSON.stringify(machines));
-    // Automatically include any machine bay in bays list
-    const machineBays = machines.map((m) => m.bay).filter(Boolean);
+    // Automatically include any machine bay in bays list EXCEPT if it's explicitly deleted
+    const deletedBays = new Set<string>(
+      JSON.parse(localStorage.getItem('hemo_deleted_bays_v1') || '[]').map((b: string) => b.trim().toLowerCase())
+    );
+    const machineBays = machines
+      .map((m) => m.bay?.trim())
+      .filter((b): b is string => Boolean(b) && !deletedBays.has(b.toLowerCase()));
+
     setBays((prev) => {
-      const combined = Array.from(new Set([...prev, ...machineBays]));
-      if (combined.length !== prev.length) {
+      const filteredPrev = prev.filter((b) => !deletedBays.has(b.trim().toLowerCase()));
+      const combined = Array.from(new Set([...filteredPrev, ...machineBays]));
+      if (combined.length !== prev.length || combined.some((b, i) => b !== prev[i])) {
         localStorage.setItem('hemo_custom_bays_v1', JSON.stringify(combined));
         return combined;
       }
@@ -459,6 +475,9 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const localPermanent: Nurse[] = JSON.parse(
             localStorage.getItem('hemo_permanent_nurses_v1') || '[]'
           );
+          const localSaved: Nurse[] = JSON.parse(
+            localStorage.getItem('hemo_nurses_v1') || '[]'
+          );
 
           if (!snapshot.empty) {
             const cloudNurses = snapshot.docs.map((d) => d.data() as Nurse);
@@ -475,12 +494,19 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
               (n) => !LEGACY_SAMPLE_NURSE_NAMES.has(n.name) && !deletedIds.has(n.id)
             );
 
-            // Ensure any locally saved permanent nurse not yet in cloud is preserved and uploaded
+            // Ensure any locally saved nurse not yet in cloud is preserved and uploaded to cloud
             const cloudIdSet = new Set(validCloudNurses.map((n) => n.id));
-            const missingFromCloud = localPermanent.filter(
-              (n) => !cloudIdSet.has(n.id) && !deletedIds.has(n.id) && !LEGACY_SAMPLE_NURSE_NAMES.has(n.name)
-            );
-            missingFromCloud.forEach((n) => syncNurseToCloud(n));
+            const allLocalCandidates = [...localPermanent, ...localSaved];
+            const missingFromCloudMap = new Map<number, Nurse>();
+            allLocalCandidates.forEach((n) => {
+              if (n && n.id && !cloudIdSet.has(n.id) && !deletedIds.has(n.id) && !LEGACY_SAMPLE_NURSE_NAMES.has(n.name)) {
+                missingFromCloudMap.set(n.id, { ...n, isPermanent: true });
+              }
+            });
+            const missingFromCloud = Array.from(missingFromCloudMap.values());
+            if (missingFromCloud.length > 0) {
+              syncAllNursesToCloud(missingFromCloud);
+            }
 
             const merged = [...validCloudNurses, ...missingFromCloud];
             const uniqueMap = new Map<number, Nurse>();
@@ -492,19 +518,28 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
             localStorage.setItem('hemo_nurses_v1', JSON.stringify(userOnly));
             localStorage.setItem('hemo_permanent_nurses_v1', JSON.stringify(userOnly));
           } else {
-            // Firestore empty: do NOT seed sample nurses! Preserve user permanent nurses and sync to Firestore
-            const validLocal = localPermanent.filter(
-              (n) => !deletedIds.has(n.id) && !LEGACY_SAMPLE_NURSE_NAMES.has(n.name)
-            );
+            // Firestore empty: preserve user nurses from local storage and sync to Firestore
+            const allLocalCandidates = [...localPermanent, ...localSaved];
+            const uniqueMap = new Map<number, Nurse>();
+            allLocalCandidates.forEach((n) => {
+              if (n && n.id && !deletedIds.has(n.id) && !LEGACY_SAMPLE_NURSE_NAMES.has(n.name)) {
+                uniqueMap.set(n.id, { ...n, isPermanent: true });
+              }
+            });
+            const validLocal = Array.from(uniqueMap.values());
             if (validLocal.length > 0) {
-              validLocal.forEach((n) => syncNurseToCloud(n));
+              syncAllNursesToCloud(validLocal);
               setNurses(validLocal);
               localStorage.setItem('hemo_nurses_v1', JSON.stringify(validLocal));
+              localStorage.setItem('hemo_permanent_nurses_v1', JSON.stringify(validLocal));
             } else {
               setNurses((prev) => {
                 const userOnly = (prev || []).filter(
                   (n) => !deletedIds.has(n.id) && !LEGACY_SAMPLE_NURSE_NAMES.has(n.name)
                 );
+                if (userOnly.length > 0) {
+                  syncAllNursesToCloud(userOnly);
+                }
                 return userOnly;
               });
             }
@@ -522,11 +557,17 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (docSnap.exists()) {
             const data = docSnap.data();
             if (Array.isArray(data.list) && data.list.length > 0) {
-              setBays((prev) => {
-                const merged = Array.from(new Set([...prev, ...data.list.filter(Boolean)]));
-                localStorage.setItem('hemo_custom_bays_v1', JSON.stringify(merged));
-                return merged;
-              });
+              const deletedBays = new Set<string>(
+                JSON.parse(localStorage.getItem('hemo_deleted_bays_v1') || '[]').map((b: string) => b.trim().toLowerCase())
+              );
+              const cloudBays = (data.list as string[])
+                .map((b) => (typeof b === 'string' ? b.trim() : ''))
+                .filter((b) => Boolean(b) && !deletedBays.has(b.toLowerCase()));
+              if (cloudBays.length > 0) {
+                const uniqueCloudBays = Array.from(new Set(cloudBays));
+                setBays(uniqueCloudBays);
+                localStorage.setItem('hemo_custom_bays_v1', JSON.stringify(uniqueCloudBays));
+              }
             }
           }
         },
@@ -613,6 +654,10 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
         collection(db, 'assignments'),
         (snapshot) => {
           setIsCloudLoaded(true);
+          const localSavedAssignments: ShiftAssignment[] = JSON.parse(
+            localStorage.getItem('hemo_assignments_v1') || '[]'
+          );
+
           if (!snapshot.empty) {
             const cloudAssignments = snapshot.docs.map((d) => d.data() as ShiftAssignment);
 
@@ -628,24 +673,53 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
             );
 
             setAssignments((prev) => {
+              const cloudIds = new Set(validAssignments.map((a) => a.id));
               const prevMap = new Map<string, ShiftAssignment>();
               prev.forEach((a) => prevMap.set(a.id, a));
 
-              return validAssignments.map((ca) => {
+              const mergedCloudAssignments = validAssignments.map((ca) => {
                 const prevA = prevMap.get(ca.id);
                 return {
                   ...ca,
                   specialDuty: ca.specialDuty ?? prevA?.specialDuty ?? null,
                 };
               });
+
+              // CRITICAL: Keep any local assignments that have not been uploaded to cloud yet!
+              const allLocalCandidates = [...prev, ...localSavedAssignments];
+              const missingInCloudMap = new Map<string, ShiftAssignment>();
+              allLocalCandidates.forEach((a) => {
+                if (a && a.id && !cloudIds.has(a.id) && !LEGACY_SAMPLE_NURSE_NAMES.has(a.nurseName)) {
+                  missingInCloudMap.set(a.id, a);
+                }
+              });
+              const missingInCloud = Array.from(missingInCloudMap.values());
+
+              if (missingInCloud.length > 0) {
+                // Upload missing assignments to Firestore batch so all devices get them!
+                syncBatchAssignmentsToCloud(missingInCloud);
+              }
+
+              const combined = [...mergedCloudAssignments, ...missingInCloud];
+              localStorage.setItem('hemo_assignments_v1', JSON.stringify(combined));
+              return combined;
             });
           } else {
             // Cloud is empty. Check if local already has assignments to upload to cloud:
             setAssignments((prev) => {
-              if (prev && prev.length > 0) {
-                syncBatchAssignmentsToCloud(prev);
-                return prev;
+              const allLocal = [...prev, ...localSavedAssignments].filter(
+                (a) => a && a.id && !LEGACY_SAMPLE_NURSE_NAMES.has(a.nurseName)
+              );
+              const uniqueLocalMap = new Map<string, ShiftAssignment>();
+              allLocal.forEach((a) => uniqueLocalMap.set(a.id, a));
+              const validLocal = Array.from(uniqueLocalMap.values());
+
+              if (validLocal.length > 0) {
+                syncBatchAssignmentsToCloud(validLocal);
+                localStorage.setItem('hemo_assignments_v1', JSON.stringify(validLocal));
+                return validLocal;
               }
+
               // Only if both cloud and local are empty, generate an initial schedule and save to cloud:
               const activeN = nurses.filter((n) => n.isActive);
               if (activeN.length > 0) {
@@ -657,6 +731,7 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 );
                 if (initSched.length > 0) {
                   syncBatchAssignmentsToCloud(initSched);
+                  localStorage.setItem('hemo_assignments_v1', JSON.stringify(initSched));
                   return initSched;
                 }
               }
@@ -1554,11 +1629,18 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    // Unmark from deleted bays if previously deleted
+    try {
+      const deleted = JSON.parse(localStorage.getItem('hemo_deleted_bays_v1') || '[]');
+      const filtered = deleted.filter((b: string) => b.trim().toLowerCase() !== trimmed.toLowerCase());
+      localStorage.setItem('hemo_deleted_bays_v1', JSON.stringify(filtered));
+    } catch {}
+
     setBays((prev) => {
       const updated = Array.from(new Set([...prev, trimmed]));
       localStorage.setItem('hemo_custom_bays_v1', JSON.stringify(updated));
       try {
-        setDoc(doc(db, 'settings', 'bays'), { list: updated }, { merge: true }).catch(() => {});
+        setDoc(doc(db, 'settings', 'bays'), { list: updated }).catch(() => {});
       } catch {}
       return updated;
     });
@@ -1602,21 +1684,29 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
     applyStatusToAll: boolean = false
   ) => {
     if (!checkKaruPermission('merubah pengaturan Bay')) return;
-    const trimmedNewName = newBayName.trim() || oldBayName;
+    const trimmedOld = oldBayName.trim();
+    const trimmedNewName = newBayName.trim() || trimmedOld;
+
+    // Unmark new name from deleted if needed
+    try {
+      const deleted = JSON.parse(localStorage.getItem('hemo_deleted_bays_v1') || '[]');
+      const filtered = deleted.filter((b: string) => b.trim().toLowerCase() !== trimmedNewName.toLowerCase());
+      localStorage.setItem('hemo_deleted_bays_v1', JSON.stringify(filtered));
+    } catch {}
 
     setBays((prev) => {
-      const updated = prev.map((b) => (b === oldBayName ? trimmedNewName : b));
+      const updated = prev.map((b) => (b.trim().toLowerCase() === trimmedOld.toLowerCase() ? trimmedNewName : b));
       const unique = Array.from(new Set(updated));
       localStorage.setItem('hemo_custom_bays_v1', JSON.stringify(unique));
       try {
-        setDoc(doc(db, 'settings', 'bays'), { list: unique }, { merge: true }).catch(() => {});
+        setDoc(doc(db, 'settings', 'bays'), { list: unique }).catch(() => {});
       } catch {}
       return unique;
     });
 
     const affectedMachines: Machine[] = [];
     const updatedMachines = machines.map((m) => {
-      if (m.bay === oldBayName) {
+      if (m.bay?.trim().toLowerCase() === trimmedOld.toLowerCase()) {
         const updated: Machine = {
           ...m,
           bay: trimmedNewName,
@@ -1645,25 +1735,37 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const deleteBay = (bayName: string, fallbackBayParam?: string) => {
     if (!checkKaruPermission('menghapus Bay')) return;
-    if (bays.length <= 1) {
+    const targetTrimmed = bayName.trim();
+    const remaining = bays.filter((b) => b.trim().toLowerCase() !== targetTrimmed.toLowerCase());
+    if (remaining.length === 0) {
       showToast('Minimal harus ada satu Bay aktif di ruangan.', 'error');
       return;
     }
 
-    const remaining = bays.filter((b) => b !== bayName);
     const fallbackBay =
-      fallbackBayParam && remaining.includes(fallbackBayParam)
-        ? fallbackBayParam
+      fallbackBayParam && remaining.some((b) => b.trim().toLowerCase() === fallbackBayParam.trim().toLowerCase())
+        ? fallbackBayParam.trim()
         : (remaining[0] || 'Bay A (Reguler)');
+
+    // Record in deleted bays persistent storage so it is never revived
+    try {
+      const deleted = JSON.parse(localStorage.getItem('hemo_deleted_bays_v1') || '[]');
+      if (!deleted.some((d: string) => d.trim().toLowerCase() === targetTrimmed.toLowerCase())) {
+        localStorage.setItem('hemo_deleted_bays_v1', JSON.stringify([...deleted, targetTrimmed]));
+      }
+    } catch {}
+
     setBays(remaining);
     localStorage.setItem('hemo_custom_bays_v1', JSON.stringify(remaining));
     try {
-      setDoc(doc(db, 'settings', 'bays'), { list: remaining }, { merge: true }).catch(() => {});
+      setDoc(doc(db, 'settings', 'bays'), { list: remaining }).catch((e) => {
+        console.warn('Error saving remaining bays to Firestore:', e);
+      });
     } catch {}
 
     const affected: Machine[] = [];
     const updatedMachines = machines.map((m) => {
-      if (m.bay === bayName) {
+      if (m.bay?.trim().toLowerCase() === targetTrimmed.toLowerCase()) {
         const updated = { ...m, bay: fallbackBay };
         affected.push(updated);
         return updated;
@@ -1671,13 +1773,14 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return m;
     });
 
+    setMachines(updatedMachines);
+    localStorage.setItem('hemo_machines_v1', JSON.stringify(updatedMachines));
+    affected.forEach((m) => syncMachineToCloud(m));
+
     if (affected.length > 0) {
-      setMachines(updatedMachines);
-      localStorage.setItem('hemo_machines_v1', JSON.stringify(updatedMachines));
-      affected.forEach((m) => syncMachineToCloud(m));
-      showToast(`Bay "${bayName}" dihapus. ${affected.length} mesin dipindahkan ke ${fallbackBay}.`, 'info');
+      showToast(`Bay "${targetTrimmed}" berhasil dihapus. ${affected.length} mesin dialihkan ke ${fallbackBay}.`, 'success');
     } else {
-      showToast(`Bay "${bayName}" berhasil dihapus.`, 'success');
+      showToast(`Bay "${targetTrimmed}" berhasil dihapus.`, 'success');
     }
   };
 
@@ -1968,7 +2071,6 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const syncAllDataToCloud = async (): Promise<boolean> => {
-    if (!checkKaruPermission('mengunggah data ke cloud')) return false;
     setIsSyncing(true);
     try {
       if (nurses.length > 0) {
@@ -1980,16 +2082,105 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (assignments.length > 0) {
         await syncBatchAssignmentsToCloud(assignments);
       }
-      await setDoc(doc(db, 'settings', 'config'), settings);
+      await setDoc(doc(db, 'settings', 'config'), settings, { merge: true });
+      await setDoc(doc(db, 'settings', 'bays'), { list: bays }, { merge: true });
       setIsCloudConnected(true);
       showToast(
-        `Berhasil! Seluruh ${assignments.length} jadwal, ${nurses.length} perawat, dan ${machines.length} mesin tersinkron & terkunci di Cloud Firestore.`,
+        `Berhasil! ${assignments.length} jadwal, ${nurses.length} perawat, dan ${machines.length} mesin tersinkron & tersimpan di Cloud Firestore.`,
         'success'
       );
       return true;
     } catch (err) {
       showToast(`Gagal sinkronisasi cloud: ${err instanceof Error ? err.message : String(err)}`, 'error');
       return false;
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const fetchDataFromCloud = async (): Promise<{ success: boolean; nurses: number; machines: number; assignments: number }> => {
+    setIsSyncing(true);
+    try {
+      const [nursesSnap, machinesSnap, assignmentsSnap, settingsSnap, baysSnap] = await Promise.all([
+        getDocs(collection(db, 'nurses')),
+        getDocs(collection(db, 'machines')),
+        getDocs(collection(db, 'assignments')),
+        getDoc(doc(db, 'settings', 'config')),
+        getDoc(doc(db, 'settings', 'bays')),
+      ]);
+
+      let nLoaded = 0;
+      let mLoaded = 0;
+      let aLoaded = 0;
+
+      if (!nursesSnap.empty) {
+        const cloudNurses = nursesSnap.docs.map((d) => d.data() as Nurse);
+        const validNurses = cloudNurses.filter(
+          (n) => !LEGACY_SAMPLE_NURSE_NAMES.has(n.name)
+        );
+        validNurses.sort((a, b) => a.id - b.id);
+        if (validNurses.length > 0) {
+          setNurses(validNurses);
+          localStorage.setItem('hemo_nurses_v1', JSON.stringify(validNurses));
+          localStorage.setItem('hemo_permanent_nurses_v1', JSON.stringify(validNurses));
+          nLoaded = validNurses.length;
+        }
+      }
+
+      if (!machinesSnap.empty) {
+        const cloudMachines = machinesSnap.docs.map((d) => d.data() as Machine);
+        cloudMachines.sort((a, b) => a.id - b.id);
+        if (cloudMachines.length > 0) {
+          setMachines(cloudMachines);
+          localStorage.setItem('hemo_machines_v1', JSON.stringify(cloudMachines));
+          mLoaded = cloudMachines.length;
+        }
+      }
+
+      if (!assignmentsSnap.empty) {
+        const cloudAssignments = assignmentsSnap.docs.map((d) => d.data() as ShiftAssignment);
+        const validAssignments = cloudAssignments.filter(
+          (a) => !LEGACY_SAMPLE_NURSE_NAMES.has(a.nurseName)
+        );
+        if (validAssignments.length > 0) {
+          setAssignments(validAssignments);
+          localStorage.setItem('hemo_assignments_v1', JSON.stringify(validAssignments));
+          aLoaded = validAssignments.length;
+        }
+      }
+
+      if (settingsSnap.exists()) {
+        const sData = settingsSnap.data() as AppSettings;
+        setSettings(sData);
+        localStorage.setItem('hemo_settings_v1', JSON.stringify(sData));
+      }
+
+      if (baysSnap.exists()) {
+        const bData = baysSnap.data();
+        if (Array.isArray(bData.list)) {
+          const deletedBays = new Set<string>(
+            JSON.parse(localStorage.getItem('hemo_deleted_bays_v1') || '[]').map((b: string) => b.trim().toLowerCase())
+          );
+          const validBays = (bData.list as string[])
+            .map((b) => (typeof b === 'string' ? b.trim() : ''))
+            .filter((b) => Boolean(b) && !deletedBays.has(b.toLowerCase()));
+          if (validBays.length > 0) {
+            const unique = Array.from(new Set(validBays));
+            setBays(unique);
+            localStorage.setItem('hemo_custom_bays_v1', JSON.stringify(unique));
+          }
+        }
+      }
+
+      setIsCloudConnected(true);
+      showToast(
+        `Data Cloud berhasil dimuat: ${nLoaded} perawat, ${mLoaded} mesin, ${aLoaded} jadwal.`,
+        'success'
+      );
+      return { success: true, nurses: nLoaded, machines: mLoaded, assignments: aLoaded };
+    } catch (err) {
+      showToast(`Gagal memuat data dari cloud: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      return { success: false, nurses: 0, machines: 0, assignments: 0 };
     } finally {
       setIsSyncing(false);
     }
@@ -2016,6 +2207,7 @@ export const HemoProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isCloudConnected,
         isCloudLoaded,
         syncAllDataToCloud,
+        fetchDataFromCloud,
         toastMessage,
         showToast,
         clearToast,
